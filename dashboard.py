@@ -7,6 +7,8 @@ from typing import Protocol
 from core.types import Result, Status
 from services.alert_service import AlertService
 from services.capture_service import CaptureService, CaptureSession
+from services.export_service import ExportService
+from services.session_index import SessionRecord
 from services.summary_service import SummaryService, render_summary
 
 SUMMARY_REFRESH_INTERVAL_SECONDS = 1.0
@@ -33,6 +35,7 @@ class Dashboard:
         input_fn: Callable[[str], str] = input,
         output_fn: Callable[[str], None] = print,
         alert_service: AlertService | None = None,
+        export_service: ExportService | None = None,
         summary_refresh_interval_seconds: float = SUMMARY_REFRESH_INTERVAL_SECONDS,
     ) -> None:
         if summary_refresh_interval_seconds <= 0:
@@ -40,6 +43,8 @@ class Dashboard:
         self.capture_service = capture_service or CaptureService()
         self.summary_service = summary_service or SummaryService()
         self.alert_service = alert_service or AlertService()
+        self.export_service = export_service or ExportService()
+        self.selected_record: SessionRecord | None = None
         self.input = input_fn
         self._output_fn = output_fn
         self._output_lock = threading.Lock()
@@ -68,7 +73,8 @@ class Dashboard:
                     "5) Toggle alerting  "
                     "6) View alerts  "
                     "7) Exit  "
-                    "8) Browse past sessions"
+                    "8) Browse past sessions  "
+                    "9) Export selected session   "
                 )
                 choice = self.input("Select an option: ").strip()
                 if choice == "1":
@@ -92,9 +98,10 @@ class Dashboard:
                     break
                 elif choice == "8":
                     self._browse_past_sessions()
-
+                elif choice == "9":
+                    self._export_session()
                 else:
-                    self.output("ERROR: input: choose an option from 1 to 8.")
+                    self.output("ERROR: input: choose an option from 1 to 9.")
 
         finally:
             self._stop_summary_refresh()
@@ -171,6 +178,7 @@ class Dashboard:
             return
 
         record = sessions[selected_index - 1]
+        self.selected_record = record
 
         selected_session = CaptureSession(
             session_id=record.session_id,
@@ -470,6 +478,47 @@ class Dashboard:
                     stop_event.set()
         self.output(message)
 
+    def _export_session(self) -> None:
+        if self.selected_record is None:
+            self.output("Browse and select a completed session first.")
+            return
+
+        destination = self.input("Enter export destination directory: ").strip()
+
+        if not destination:
+            self.output("Export cancelled.")
+            return
+
+        self.output("1. PCAP only")
+        self.output("2. Zeek logs only")
+        self.output("3. Both")
+
+        choice = self.input("Choose export type: ").strip()
+
+        if choice == "1":
+            include_pcap, include_zeek = True, False
+        elif choice == "2":
+            include_pcap, include_zeek = False, True
+        elif choice == "3":
+            include_pcap, include_zeek = True, True
+        else:
+            self.output("Invalid choice.")
+            return
+
+        result = self.export_service.export_session(
+            self.selected_record,
+            destination,
+            include_pcap=include_pcap,
+            include_zeek_logs=include_zeek,
+        )
+
+        if result.status != Status.OK:
+            self.output(f"Export failed: {result.detail}")
+            return
+
+        self.output("Export completed successfully!")
+        for path in result.value:
+            self.output(f"Exported: {path}")
 
 if __name__ == "__main__":
     Dashboard().run()

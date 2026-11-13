@@ -89,7 +89,7 @@ def test_dashboard_guides_user_through_capture_summary_and_safe_stop():
 
 
 def test_dashboard_empty_and_invalid_choices_do_not_require_hardware():
-    answers = iter(["9", "3", "7"])
+    answers = iter(["", "3", "7"])
     output = []
     Dashboard(FakeCapture(), FakeSummary(), lambda _: next(answers), output.append).run()
 
