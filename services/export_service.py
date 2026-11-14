@@ -31,8 +31,15 @@ class ExportService:
         if not include_pcap and not include_zeek_logs:
             return Result(Status.INVALID_INPUT, detail="Select PCAP, Zeek logs, or both.")
 
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", record.session_id):
+        if not isinstance(record.session_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]+", record.session_id
+        ):
             return Result(Status.INVALID_INPUT, detail="Unsafe session ID.")
+
+        if not isinstance(destination, (str, os.PathLike)) or (
+            isinstance(destination, str) and not destination.strip()
+        ):
+            return Result(Status.INVALID_INPUT, detail="Export destination is required.")
 
         try:
             destination_path = Path(destination).expanduser()

@@ -87,7 +87,16 @@ def validate_duration(duration: int | str | None) -> Result[int | None]:
     if isinstance(duration, str):
         if not duration.isdecimal():
             return Result(Status.INVALID_INPUT, detail="Duration must be a whole number of seconds.")
-        duration = int(duration)
+        normalized_duration = duration.lstrip("0") or "0"
+        if len(normalized_duration) > len(str(MAX_CAPTURE_DURATION_SECONDS)):
+            return Result(
+                Status.INVALID_INPUT,
+                detail=(
+                    "Duration must be between 1 and "
+                    f"{MAX_CAPTURE_DURATION_SECONDS} seconds."
+                ),
+            )
+        duration = int(normalized_duration)
     if not isinstance(duration, int) or not 0 < duration <= MAX_CAPTURE_DURATION_SECONDS:
         return Result(
             Status.INVALID_INPUT,
