@@ -2,15 +2,10 @@
 
 ## Status
 
-PPS-16 is **partially validated and still open**. Automated checks for input
-validation, export path safety, and the mocked capture path passed. Live
-network checks were not run because this validation environment is Windows,
-not the project's selected Linux VM. POSIX permission and symlink checks were
-skipped where Windows could not provide those semantics; run them on the Linux
-VM before closing the issue.
-
-Do not treat the passing mocked checks as proof of live network behavior or
-export safety.
+PPS-16 validation is **complete for the documented Linux VM scope**. The
+automated suite, POSIX permission and export checks, and isolated virtual-link
+observations passed. This does not establish behavior on a physical NIC or
+Raspberry Pi, or claim performance results for either platform.
 
 ## Requirements and traceability
 
@@ -22,25 +17,25 @@ Test Plan; the SRS's own Section 6.3 does not number those five requirements.
 
 | Requirement | Validation and evidence | Result |
 |---|---|---|
-| SEC-01 - Captured data is local; no outbound network connection carries captured data. | Source review found no application HTTP, URL, or outbound socket APIs; `socket.if_nameindex()` is used for interface enumeration. `test_capture_and_storage_path_do_not_open_outbound_sockets` guards Python socket connect/send calls during a mocked capture and finalization. | Automated/mock check passed. A Linux VM process-family and network observation remains required; Zeek/tcpdump behavior is not proven by a fake-process test. |
-| SEC-02 - Session directories/files and index are readable only by the owning OS user (700/600 or stricter). | Capture finalization sets directories to 700 and regular files to 600. `test_session_zeek_output_and_index_are_owner_only_after_finalization`, `test_start_capture_launches_live_zeek_and_packet_buffered_pcap`, and `test_index_and_storage_directory_are_owner_only_on_posix` cover modes. | POSIX permission assertions were skipped on this Windows host. Verify modes and access by a second OS user in the Linux VM. |
-| SEC-03 - Interface, capture filter, and duration are validated before use and not passed unsanitized to a shell or Zeek. | Parameterized malicious-input tests verify rejection before process creation. Process argument lists and `shell=False` are checked by `test_capture_uses_passive_argument_lists_without_a_shell`. | Automated tests passed. A long decimal duration exposed potentially unbounded integer conversion; it is now length-checked before conversion, with a regression test. |
-| SEC-04 - Capture is passive and sends no probes or injected packets on the monitored segment. | `test_capture_uses_passive_argument_lists_without_a_shell` checks the mocked Zeek/tcpdump command lines are interface listeners and not probe/injection commands. Source review found no packet-generation API. | Code-level/mock check passed. An isolated Linux VM observation remains required. |
-| SEC-05 - Exports go only to the selected destination and session names cannot traverse paths. | PPS-15's `ExportService` validates session IDs, confines Zeek log paths to the recorded Zeek directory, rejects symlink sources/destinations, and creates outputs exclusively with mode 600. `tests/test_export_service.py` exercises these cases. | Core automated tests passed. Non-string session IDs and blank destinations exposed exceptions/unsafe current-directory export; both were fixed. Three symlink tests and the POSIX output-mode test were skipped on Windows and remain to be run on Linux. |
+| SEC-01 - Captured data is local; no outbound network connection carries captured data. | Source review and `test_capture_and_storage_path_do_not_open_outbound_sockets`; Linux VM process-family trace plus an outbound `tcpdump` observer on the isolated veth. | Passed for this VM run: no `connect()` calls or outbound packets were observed. Reported `sendto`/`sendmsg` calls targeted local `AF_NETLINK` sockets; the `RTM_GETLINK` requests queried interface metadata. Physical NIC behavior was not tested. |
+| SEC-02 - Session directories/files and index are readable only by the owning OS user (700/600 or stricter). | POSIX permission tests, `stat`, and read checks as `nobody`. | Passed: directories were 700, regular files/index 600, owned by root because capture ran under `sudo`; `nobody` could not read the index or PCAP. |
+| SEC-03 - Interface, capture filter, and duration are validated before use and not passed unsanitized to a shell or Zeek. | Parameterized validation tests and `test_capture_uses_passive_argument_lists_without_a_shell`; full Linux test suite. | Passed: the Linux full suite completed with 133 passed. |
+| SEC-04 - Capture is passive and sends no probes or injected packets on the monitored segment. | Passive argument-list test plus isolated veth observation and PCAP inspection. | Passed for this virtual-link run: the PCAP contained the peer's ARP request; outbound observation reported 0 packets and 0 kernel drops. Physical NIC behavior was not tested. |
+| SEC-05 - Exports go only to the selected destination and session names cannot traverse paths. | `tests/test_export_service.py`, including path, symlink, overwrite, and POSIX mode cases. | Passed on Linux: 17 tests passed, with no skips reported. |
 
 ## Test environment and tested revision
 
-- Validation date: 2026-11-14.
+- Linux VM validation date: 2026-11-16.
 - Branch: `pps16-security-validation`.
-- Tested HEAD before these uncommitted PPS-16 changes:
-  `198032cc1c8b91c7b7197ffee8fc5f89df0a0a33`
-  (`[PPS-15] Export sessions safely (#32)`).
-- PPS-15 is present locally as a fast-forward from `origin/main`; both PPS-15
-  and the uncommitted PPS-16 changes are preserved.
-- Host: Windows; Python 3.10.6; pytest 9.1.1.
-- No Linux VM, live interface, Zeek process, tcpdump process, or real network
-  traffic was available for this run. Capture subprocesses in automated tests
-  are fakes.
+- Tested revision: `c3c4492` (`test: add PPS-16 security validation`).
+- Linux VM: Python 3.12.3, pytest 9.2.0, Zeek 8.0.11,
+  `ncsa/bro-simple-scan` 4.1, tcpdump 4.99.4, libpcap 1.10.4.
+- The live test used an isolated veth pair (`pps16-mon` / `pps16-peer`), not
+  a physical network interface. Capture was run with `sudo`, so the test
+  session artifacts were owned by root.
+- The initial Windows baseline used Python 3.10.6 and pytest 9.1.1. Its
+  POSIX-specific checks were skipped, so Linux results below supersede those
+  skips for the documented VM scope.
 - The GitHub Actions workflow uses Python 3.12. The local Python 3.10 runtime
   cannot collect `tests/test_dashboard.py`, which imports `datetime.UTC`
   (available starting in Python 3.11). A one-process compatibility shim was
@@ -58,7 +53,7 @@ Test Plan; the SRS's own Section 6.3 does not number those five requirements.
 
 Expected results are rejection before process execution for unsafe inputs,
 owner-only POSIX modes after finalization, and only the documented passive
-listener argument lists. Actual results from this Windows host:
+listener argument lists. The following table preserves the initial Windows baseline results:
 
 | Test(s) | Expected | Actual |
 |---|---|---|
@@ -70,11 +65,11 @@ listener argument lists. Actual results from this Windows host:
 | `test_capture_uses_passive_argument_lists_without_a_shell` | Zeek/tcpdump receive the expected list arguments with `shell=False`; capture starts/stops. | Passed with fake subprocesses. No packets were observed. |
 | `test_path_like_unknown_session_ids_do_not_select_or_stop_sessions` | Unknown path-like IDs cannot stop a capture. | Passed. It does not cover export path handling. |
 | `test_export_writes_selected_files_with_safe_names_and_contents` | Selected PCAP/log bytes are copied under generated names in the selected directory. | Passed. |
-| `test_exported_files_are_owner_only_on_posix` | Exported regular files are mode 600 and owned by the effective user. | Skipped on Windows; run on Linux. |
+| `test_exported_files_are_owner_only_on_posix` | Exported regular files are mode 600 and owned by the effective user. | Skipped on Windows; POSIX checks ran in the Linux VM. |
 | `test_invalid_session_ids_are_rejected_without_writing_files` | Traversal, absolute, dotted, blank, and non-string IDs return `INVALID_INPUT` without output. | Passed (6 parameter cases); non-string IDs now return a result instead of raising `TypeError`. |
 | `test_invalid_destinations_are_rejected_instead_of_defaulting_to_cwd` | Blank or non-path destinations are rejected rather than resolving to the current directory. | Passed (3 parameter cases); empty strings previously exported into the working directory and are now rejected. |
 | `test_missing_or_non_directory_destinations_are_rejected` | A missing path or file destination cannot receive exports. | Passed. |
-| `test_symlink_destination_is_rejected_without_writing_through_it`, `test_symlinked_source_is_rejected_without_copying_its_target`, `test_symlink_at_export_filename_is_not_followed_or_overwritten` | Symlink destinations, sources, and output names are rejected without writing through them. | Skipped on this Windows host because symlink creation was unavailable. Run on Linux. |
+| `test_symlink_destination_is_rejected_without_writing_through_it`, `test_symlinked_source_is_rejected_without_copying_its_target`, `test_symlink_at_export_filename_is_not_followed_or_overwritten` | Symlink destinations, sources, and output names are rejected without writing through them. | Skipped on Windows; Linux export tests passed. |
 | `test_zeek_log_outside_session_directory_is_rejected` | A Zeek path outside the selected session is rejected. | Passed. |
 | `test_existing_export_is_not_overwritten` | An existing export remains unchanged and is not overwritten. | Passed. |
 | Existing `test_invalid_durations_are_rejected_before_commands_launch`, `test_unsafe_protocol_filters_are_rejected_before_commands_launch`, interface validation tests, capture command tests, and POSIX index-permission test | Preserve existing rejection, command construction, and storage behavior. | Passed where runnable; the POSIX index-permission test is skipped on Windows. |
@@ -105,8 +100,41 @@ git diff --check
 Passed (no whitespace errors).
 ```
 
-The shimmed run is useful regression evidence, but it does not replace a
-native full-suite run on the workflow's Python 3.12 or on the Linux VM.
+The shimmed run is useful regression evidence, but does not replace the native
+Python 3.12 Linux VM run recorded below.
+
+Linux VM commands and results:
+
+```text
+python3.12 -m pytest -q \
+  tests/test_security_validation.py::test_session_zeek_output_and_index_are_owner_only_after_finalization \
+  tests/test_session_index.py::test_index_and_storage_directory_are_owner_only_on_posix
+2 passed
+
+python3.12 -m pytest -q tests/test_export_service.py
+17 passed
+
+python3.12 -m pytest -q
+133 passed
+```
+
+Manual Linux VM observations:
+
+- Zeek 8.0.11 and `ncsa/bro-simple-scan` 4.1 were installed; live capture
+  started and stopped with status `OK`.
+- On `pps16-mon`, `tcpdump -Q out` reported 0 packets captured and 0 kernel
+  drops during the peer test.
+- The session PCAP contained the peer's ARP request for `198.18.16.1`.
+- The trace showed Python, Zeek, and tcpdump as the executed processes. The
+  reviewed `sendto`/`sendmsg` entries targeted `AF_NETLINK`; `RTM_GETLINK`
+  requests queried local interface metadata. No `connect()` calls or external
+  network destinations were observed.
+- `stat` reported mode 700 for session directories and 600 for the index and
+  PCAP, owned by `root:root`. The `nobody` account could not read the index or
+  PCAP.
+
+These observations validate the documented isolated-VM checks only. They do
+not establish physical NIC, Raspberry Pi, or throughput/packet-loss behavior.
 
 ## Linux VM setup and live verification
 
@@ -282,7 +310,7 @@ owns root-run captures. The automated test validates the effective UID on
 POSIX. Avoid changing permissions to make root-created captures readable by
 all users.
 
-## SEC-05 results and remaining follow-up
+## SEC-05 implementation and Linux verification
 
 PPS-15 added `services/export_service.py`. The new tests cover:
 
@@ -300,8 +328,6 @@ the current working directory and wrote the synthetic test files there; the
 service now rejects empty and whitespace-only destinations. Those two
 synthetic files were verified and removed after the repro.
 
-The tests for symlink behavior and POSIX exported-file permissions are present
-but were skipped on Windows. Run `tests/test_export_service.py` on the Linux
-VM; do not mark those checks complete from the Windows run. Along with the
-pending SEC-01/SEC-04 live observations and SEC-02 Linux ownership checks,
-those skipped platform checks mean PPS-16 acceptance is not yet fully met.
+The Linux VM run completed `tests/test_export_service.py` with 17 passed and
+no skips. This exercised the symlink and POSIX output-mode checks that were
+unavailable during the initial Windows run.
